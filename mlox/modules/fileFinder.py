@@ -18,6 +18,7 @@ import logging
 
 file_logger = logging.getLogger('mlox.fileFinder')
 
+
 class caseless_filenames:
 
     def __init__(self):
@@ -74,23 +75,6 @@ class caseless_dirlist:
     def filelist(self):
         return(self.files.values())
 
-
-# given a list of files, return a new list without dups (caseless), plus a list of any dups
-def filter_dup_files(files):
-    tmpfiles = []               # new list
-    filtered = []               # any filtered dups from original list
-    seen = {}
-    C = caseless_filenames()
-    for f in files:
-        c = C.cname(f)
-        if c in seen:
-            filtered.append(f)
-        else:
-            tmpfiles.append(f)
-        seen[c] = True
-    return(tmpfiles, filtered)
-
-
 def _find_appdata():
     """a somewhat hacky function for finding where Oblivion's Application Data lives.
     Hopefully works under Windows, Wine, and native Linux."""
@@ -124,11 +108,11 @@ def _find_appdata():
         return(None)
     # Windows
     try:
-        import _winreg
+        import winreg
         try:
-            key = _winreg.OpenKey(_winreg.HKEY_CURRENT_USER,
+            key = winreg.OpenKey(_winreg.HKEY_CURRENT_USER,
                                   r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders')
-            vals = _winreg.QueryValueEx(key, 'Local AppData')
+            vals = winreg.QueryValueEx(key, 'Local AppData')
         except WindowsError:
             return None
         else:
@@ -158,18 +142,18 @@ def find_game_dirs():
     if gamedir != None:
         game = "Morrowind"
         list_file = gamedir.find_path("Morrowind.ini")
-        datadir = caseless_dirlist(gamedir.find_path("Data Files"))
+        datadir = gamedir.find_path("Data Files")
     else:
         gamedir = cwd.find_parent_dir("Oblivion.ini")
         if gamedir != None:
             game = "Oblivion"
             list_file = _get_Oblivion_plugins_file()
-            datadir = caseless_dirlist(gamedir.find_path("Data"))
+            datadir = gamedir.find_path("Data")
         else:
             # Not running under a game directory, so we're probably testing
             # assume plugins live in current directory.
-            datadir = caseless_dirlist("..")
+            datadir = os.path.abspath("..")
     file_logger.debug("Found Game:  {0}".format(game))
     file_logger.debug("Plugins file at:  {0}".format(list_file))
-    file_logger.debug("Data Files at: {0}".format(datadir.dirpath()))
+    file_logger.debug("Data Files at: {0}".format(datadir))
     return (game,list_file,datadir)

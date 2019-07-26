@@ -61,7 +61,7 @@ class pluggraph:
             return False
         self.nodes.setdefault(plug1, [])
         if plug2 in self.nodes[plug1]: # edge already exists
-            pluggraph_logger.debug("%s: Dup Edge: \"%s\" -> \"%s\"" % (where, plug1, plug2))
+            pluggraph_logger.debug("%s: Not adding duplicate Edge: \"%s\" -> \"%s\"", where, plug1, plug2)
             return True
         # add plug2 to the graph as a child of plug1
         self.nodes[plug1].append(plug2)
@@ -69,7 +69,23 @@ class pluggraph:
         pluggraph_logger.debug("adding edge: %s -> %s" % (plug1, plug2))
         return(True)
 
-    def explain(self, what, active):
+    def get_dot_graph(self):
+        """
+        Produce a graphviz dot graph.
+
+        This is mostly a novelty to visualize what's going on
+        """
+        buffer = "digraph plugins {\n"
+        for (node, plugins) in self.nodes.items():
+            for a_plugin in plugins:
+                buffer += "\""+ node + "\" -> \"" + a_plugin + "\"\n"
+        buffer += "}\n"
+        return buffer
+
+    def explain(self, what, active_plugins):
+        """
+        Tell the user all the plugins mlox thinks should follow <what>
+        """
         seen = {}
         output = ""
         output += "This is a picture of all the plugins mlox thinks should follow {0}\n".format(what)
@@ -83,7 +99,7 @@ class pluggraph:
             seen[n] = True
             if n in self.nodes:
                 for child in self.nodes[n]:
-                    prefix = indent.replace(" ", "+") if child in active else indent.replace(" ", "=")
+                    prefix = indent.replace(" ", "+") if child in active_plugins else indent.replace(" ", "=")
                     output += "%s%s\n" % (prefix, child)
                     explain_rec(" " + indent, child)
             return output

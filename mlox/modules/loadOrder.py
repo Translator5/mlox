@@ -1,37 +1,37 @@
 import os
-import sys
-import StringIO
 import logging
-import modules.fileFinder as fileFinder
-import modules.pluggraph as pluggraph
-import modules.configHandler as configHandler
-import modules.ruleParser as ruleParser
-from modules.resources import base_file, user_file
+from . import fileFinder
+from . import pluggraph
+from . import ruleParser
+from . import configHandler
+from .resources import base_file, user_file
 
 old_loadorder_output = "current_loadorder.out"
 new_loadorder_output = "mlox_new_loadorder.out"
 
-order_logger = logging.getLogger('mlox.loadorder')
+order_logger = logging.getLogger('mlox.loadOrder')
 
 class loadorder:
     """Class for reading plugin mod times (load order), and updating them based on rules"""
     def __init__(self):
         # order is the list of plugins in Data Files, ordered by mtime
-        self.active = {}                   # current active plugins
         self.order = []                    # the load order
         self.new_order = []                # the new load order
-        self.datadir = None                # where plugins live
-        self.plugin_file = None            # Path to the file containing the plugin list
-        self.graph = pluggraph.pluggraph()
         self.is_sorted = False
-        self.origin = None                 # where plugins came from (active, installed, file)
-        self.game_type = None              # 'Morrowind', 'Oblivion', or None for unknown
         self.caseless = fileFinder.caseless_filenames()
 
+        # self.datadir = None                # where plugins live
+        # self.plugin_file = None            # Path to the file containing the plugin list
+        # self.game_type = None              # 'Morrowind', 'Oblivion', or None for unknown
         self.game_type, self.plugin_file, self.datadir = fileFinder.find_game_dirs()
 
     def get_active_plugins(self):
-        """Get the active list of plugins from the game configuration. Updates self.active and self.order."""
+        """
+        Get the active list of plugins from the game configuration.
+
+        "Active Plugins" are plugins that are both in the Data Files directory and in Morrowind.ini
+        Updates self.order
+        """
         self.is_sorted = False
         if self.plugin_file == None:
             order_logger.warning("No game configuration file was found!\nAre you sure you're running mlox in or under your game directory?")
@@ -42,62 +42,69 @@ class loadorder:
         dirFiles = configHandler.dataDirHandler(self.datadir).read()
 
         # Remove plugins not in the data directory (and correct capitalization)
-        configFiles = map(str.lower, configFiles)
+        configFiles = list(map(str.lower, configFiles))
         self.order = filter(lambda x: x.lower() in configFiles, dirFiles)
 
         #Convert the files to lowercase, while storing them in a dict
-        self.order = map(self.caseless.cname,self.order)
+        self.order = list(map(self.caseless.cname,self.order))
 
         order_logger.info("Found {0} plugins in: \"{1}\"".format(len(self.order), self.plugin_file))
-        for p in self.order:
-            self.active[p] = True
-        self.origin = "Active Plugins"
+        if self.order == []:
+            order_logger.warning("No active plugins, defaulting to all plugins in Data Files directory.")
+            self.get_data_files()
 
     def get_data_files(self):
-        """Get the load order from the data files directory. Updates self.active and self.order."""
+        """
+        Get the load order from the data files directory.
+
+        Updates self.order
+        """
         self.is_sorted = False
         self.order = configHandler.dataDirHandler(self.datadir).read()
 
         #Convert the files to lowercase, while storing them in a dict
-        self.order = map(self.caseless.cname,self.order)
+        self.order = list(map(self.caseless.cname,self.order))
 
-        order_logger.info("Found {0} plugins in: \"{1}\"".format(len(self.order), self.datadir.dirpath()))
-        for p in self.order:
-            self.active[p] = True
-        self.origin = "Installed Plugins"
-
-    #List the versions of all plugins in the current load order
-    def listversions(self):
-        out = "{0:20} {1:20} {2}\n".format("Name", "Description", "Plugin Name")
-        for p in self.order:
-            (file_ver, desc_ver) = ruleParser.get_version(p,self.datadir)
-            out += "{0:20} {1:20} {2}\n".format(file_ver, desc_ver, self.caseless.truename(p))
-        return out
+        order_logger.info("Found {0} plugins in: \"{1}\"".format(len(self.order), self.datadir))
 
     def read_from_file(self, fromfile):
-        """Get the load order by reading an input file.
+        """
+        Get the load order by reading an input file.
+
         Clears self.game_type and self.datadir.
-        Updates self.plugin_file, self.active, and self.order."""
+        Updates self.plugin_file and self.order
+        """
         self.is_sorted = False
         self.game_type = None
         self.datadir = None         #This tells the parser to not worry about things like [SIZE] checks, or trying to read the plugin descriptions
         self.plugin_file = fromfile
 
         self.order = configHandler.configHandler(fromfile).read()
-        if len(self.order) == 0:
+        if self.order == []:
             order_logger.warning("No plugins detected.\nmlox understands lists of plugins in the format used by Morrowind.ini or Wrye Mash.\nIs that what you used for input?")
 
         #Convert the files to lowercase, while storing them in a dict
-        self.order = map(self.caseless.cname,self.order)
+        self.order = list(map(self.caseless.cname,self.order))
 
         order_logger.info("Found {0} plugins in: \"{1}\"".format(len(self.order), self.plugin_file))
-        for p in self.order:
-            self.active[p] = True
-        self.origin = "Plugin List from %s" % os.path.basename(fromfile)
         order_logger.info("(Note: When the load order input is from an external source, the [SIZE] predicate cannot check the plugin filesizes, so it defaults to True).")
 
-    def add_current_order(self):
-        """We treat the current load order as a sort of preferred order in
+    def listversions(self):
+        """List the versions of all plugins in the current load order"""
+        out = "{0:20} {1:20} {2}\n".format("Name", "Description", "Plugin Name")
+        for p in self.order:
+            (file_ver, desc_ver) = ruleParser.get_version(p, self.datadir)
+            out += "{0:20} {1:20} {2}\n".format(str(file_ver), str(desc_ver), self.caseless.truename(p))
+        return out
+
+    def add_current_order(self, graph):
+        """
+        Add the current load order as a pseudo rule set.
+
+        This lets us maintain the original ordering in the case where the rules say it doesn't matter.
+        It also means we don't exclude any plugins that aren't in the rules.
+
+        We treat the current load order as a sort of preferred order in
         the case where there are no rules. However, we have to be careful
         when there exists a [NEARSTART] or [NEAREND] rule for a plugin,
         that we do not introduce a new edge, we only add the node itself.
@@ -108,46 +115,38 @@ class loadorder:
         if len(self.order) < 2:
             return
         order_logger.debug("adding edges from CURRENT ORDER")
+
         # make ordering pseudo-rules for esms to follow official .esms
         if self.game_type == "Morrowind":
-            self.graph.add_edge("", "morrowind.esm", "tribunal.esm")
-            self.graph.add_edge("", "tribunal.esm", "bloodmoon.esm")
-            for p in self.active: # foreach of the user's .esms
+            graph.add_edge("", "morrowind.esm", "tribunal.esm")
+            graph.add_edge("", "tribunal.esm", "bloodmoon.esm")
+            # Make all user's .esm files depend on bloodmoon.esm
+            for p in self.order:
                 if p[-4:] == ".esm":
                     if p not in ("morrowind.esm", "tribunal.esm", "bloodmoon.esm"):
-                        self.graph.add_edge("", "bloodmoon.esm", p)
+                        graph.add_edge("", "bloodmoon.esm", p)
+
         # make ordering pseudo-rules from nearend info
-        kingyo_fun = [x for x in self.graph.nearend if x in self.active]
+        kingyo_fun = [x for x in graph.nearend if x in self.order]
         for p_end in kingyo_fun:
             for p in [x for x in self.order if x != p_end]:
-                self.graph.add_edge("", p, p_end)
+                graph.add_edge("", p, p_end)
         # make ordering pseudo-rules from current load order.
         prev_i = 0
-        self.graph.nodes.setdefault(self.order[prev_i], [])
+        graph.nodes.setdefault(self.order[prev_i], [])
         for curr_i in range(1, len(self.order)):
-            self.graph.nodes.setdefault(self.order[curr_i], [])
-            if (self.order[curr_i] not in self.graph.nearstart and
-                self.order[curr_i] not in self.graph.nearend):
+            graph.nodes.setdefault(self.order[curr_i], [])
+            if (self.order[curr_i] not in graph.nearstart and
+                self.order[curr_i] not in graph.nearend):
                 # add an edge, on any failure due to cycle detection, we try
                 # to make an edge between the current plugin and the first
                 # previous ancestor we can succesfully link and edge from.
                 for i in range(prev_i, 0, -1):
-                    if (self.order[i] not in self.graph.nearstart and
-                        self.order[i] not in self.graph.nearend):
-                        if self.graph.add_edge("", self.order[i], self.order[curr_i]):
+                    if (self.order[i] not in graph.nearstart and
+                        self.order[i] not in graph.nearend):
+                        if graph.add_edge("", self.order[i], self.order[curr_i]):
                             break
             prev_i = curr_i
-
-    def save_order(self, filename, order, what):
-        try:
-            out = open(filename, 'w')
-        except IOError:
-            order_logger.error("Unable to write to {0} file:  {1}".format(what,filename))
-            return
-        for p in order:
-            print >> out, p
-        out.close()
-        order_logger.info("%s saved to: %s" % (what, filename))
 
     def get_original_order(self):
         """Get the original plugin order in a nice printable format"""
@@ -177,20 +176,17 @@ class loadorder:
         return formatted
 
     def explain(self,plugin_name,base_only = False):
-        """Expalin why a mod is in it's current position"""
-        original_graph = self.graph
-        self.graph = pluggraph.pluggraph()
-
-        parser = ruleParser.rule_parser(self.active, self.graph, self.datadir,StringIO.StringIO(),self.caseless)
+        """Explain why a mod is in it's current position"""
+        parser = ruleParser.rule_parser(self.order, self.datadir, self.caseless)
         if os.path.exists(user_file):
             parser.read_rules(user_file)
         parser.read_rules(base_file)
+        plugin_graph = parser.get_graph()
 
         if not base_only:
-            self.add_current_order() # tertiary order "pseudo-rules" from current load order
-        output = self.graph.explain(plugin_name, self.active)
+            self.add_current_order(plugin_graph) # tertiary order "pseudo-rules" from current load order
 
-        self.graph = original_graph
+        output = plugin_graph.explain(plugin_name, self.order)
         return output
 
     def update(self,progress = None):
@@ -198,9 +194,7 @@ class loadorder:
         Update the load order based on input rules.
         Returns the parser's recommendations on success, or False if something went wrong.
         """
-        parser_out_stream = StringIO.StringIO()
         self.is_sorted = False
-        self.graph = pluggraph.pluggraph()
         if self.order == []:
             order_logger.error("No plugins detected!\nmlox needs to run somewhere under where the game is installed.")
             return False
@@ -208,10 +202,9 @@ class loadorder:
         for p in self.get_original_order():
             order_logger.debug("  " + p)
 
-
         # read rules from various sources, and add orderings to graph
         # if any subsequent rule causes a cycle in the current graph, it is discarded
-        parser = ruleParser.rule_parser(self.active, self.graph, self.datadir,parser_out_stream,self.caseless)
+        parser = ruleParser.rule_parser(self.order, self.datadir, self.caseless)
         if os.path.exists(user_file):
             parser.read_rules(user_file, progress)
         if not parser.read_rules(base_file, progress):
@@ -219,17 +212,17 @@ class loadorder:
             self.new_order = []
             return False
 
-        # now do the topological sort of all known plugins (rules + load order)
-        self.add_current_order() # tertiary order "pseudo-rules" from current load order
-        sorted = self.graph.topo_sort()
+        # Convert the graph into a sorted list of all plugins (rules + load order)
+        plugin_graph = parser.get_graph()
+        self.add_current_order(plugin_graph)    # tertiary order "pseudo-rules" from current load order
+        sorted_plugins = plugin_graph.topo_sort()
 
-        # the "sorted" list will be a superset of all known plugin files,
-        # inluding those in our Data Files directory.
-        # but we only want to update plugins that are in our current "Data Files"
-        sorted_datafiles = [f for f in sorted if f in self.active]
+        # The "sorted" list will be a superset of all known plugin files,
+        # but we only care about active plugins.
+        sorted_datafiles = [f for f in sorted_plugins if f in self.order]
         (esm_files, esp_files) = configHandler.partition_esps_and_esms(sorted_datafiles)
-        new_order_cname = [p for p in esm_files + esp_files]
-        self.new_order = [self.caseless.truename(p) for p in new_order_cname]
+        new_order_cname = esm_files + esp_files
+        self.new_order = list(map(self.caseless.truename, new_order_cname))
 
         order_logger.debug("New load order:")
         for p in self.get_new_order():
@@ -244,25 +237,26 @@ class loadorder:
             order_logger.info("[Plugins already in sorted order. No sorting needed!]")
             self.is_sorted = True
 
-        if self.datadir != None:
+        if self.datadir:
             # these are things we do not want to do if just testing a load order from a file
             # save the load orders to file for future reference
-            self.save_order(old_loadorder_output, [self.caseless.truename(p) for p in self.order], "current")
-            self.save_order(new_loadorder_output, self.new_order, "mlox sorted")
-        return parser_out_stream.getvalue()
+            configHandler.configHandler(old_loadorder_output, "raw").write(self.order)
+            configHandler.configHandler(new_loadorder_output, "raw").write(self.new_order)
+        return parser.get_messages()
 
     def write_new_order(self):
+        """Write/save the new order to the directory and config file."""
         if not isinstance(self.new_order,list) or self.new_order == []:
             order_logger.error("Not saving blank load order.")
             return False
-        if isinstance(self.datadir,fileFinder.caseless_dirlist):
+        if self.datadir:
             if configHandler.dataDirHandler(self.datadir).write(self.new_order):
                 self.is_sorted = True
         if isinstance(self.plugin_file,str):
             if configHandler.configHandler(self.plugin_file,self.game_type).write(self.new_order):
                 self.is_sorted = True
 
-        if self.is_sorted != True:
+        if not self.is_sorted:
             order_logger.error("Unable to save new load order.")
             return False
         return True

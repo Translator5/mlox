@@ -1,9 +1,9 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # -*- mode: python -*-
 # mlox - the elder scrolls Mod Load Order eXpert
-#Copyright (c) 2009-2017
+# Copyright (c) 2009-2017
 #    John Moonsugar, an alias
-#    dragon32
+#    Dragon32
 #    Arthur Moore
 # Distributed as part of the mlox project:
 #   https://github.com/mlox/mlox
@@ -15,17 +15,18 @@ import logging
 import argparse
 import pprint
 import re
-from modules.resources import update_file, program_path, UPDATE_URL
+import colorama
+from colorama import Fore, Style
+from modules.resources import user_path, update_file, UPDATE_URL
 from modules.update import update_compressed_file
 import modules.version as version
 from modules.loadOrder import loadorder
-from modules.gui import _
-from modules.gui import load_translations
+from modules.translations import dump_translations, _
 
 def single_spaced(in_string):
     """
     Convert any instance of more than one space character to a single space in a string
-    Also handles tabs, and removes whitespace at the begining or end of a line
+    Also handles tabs, and removes whitespace at the beginning or end of a line
     """
     tmp_string = in_string
     tmp_string = re.sub('\t', ' ', tmp_string)
@@ -33,35 +34,38 @@ def single_spaced(in_string):
     tmp_string = re.sub('\n ', '\n', tmp_string)
     return tmp_string.strip()
 
+
 class ColorFormatConsole(logging.Formatter):
     """Color code the logging information on Unix terminals"""
     levels = {
-        'DEBUG'    : '',
-        'INFO'     : '',
-        'WARNING'  : '\x1b[0;30;43m',  #Yellow (ish)
-        'ERROR'    : '\x1b[0;30;41m',  #Red (ish)
-        'CRITICAL' : '\x1b[0;30;41m'   #Red (ish)
+        'DEBUG':    '',
+        'INFO':     '',
+        'WARNING':  Fore.YELLOW,
+        'ERROR':    Fore.RED,
+        'CRITICAL': Fore.RED
     }
+
     def __init__(self, msg):
+        colorama.init()
         logging.Formatter.__init__(self, msg)
+
     def format(self, record):
-        return self.levels[record.levelname] + logging.Formatter.format(self, record) +'\x1b[0m'
+        return self.levels[record.levelname] + logging.Formatter.format(self, record) + Style.RESET_ALL
+
 
 class ShowTranslations(argparse.Action):
     """Dump the translation dictionary for the specified language, then exit."""
     def __call__(self, parser, namespace, values, option_string=None):
-        print "Languages translations for: %s" % values[0]
-        for key, value in (load_translations(values[0]).items()):
-            print "%s:" % key
-            print " -> %s" % value.encode("utf-8")
+        dump_translations(values)
         sys.exit(0)
+
 
 class ListVersions(argparse.Action):
     """List the version information of the current data files, then exit"""
     def __call__(self, parser, namespace, values, option_string=None):
         my_loadorder = loadorder()
         my_loadorder.get_data_files()
-        print my_loadorder.listversions()
+        print(my_loadorder.listversions())
         sys.exit(0)
 
 def command_line_mode(args):
@@ -78,9 +82,6 @@ def command_line_mode(args):
             my_loadorder.get_data_files()
         else:
             my_loadorder.get_active_plugins()
-            if my_loadorder.order == []:
-                logging.warn("No active plugins, defaulting to all plugins in Data Files directory.")
-                my_loadorder.get_data_files()
         process_load_order(my_loadorder, args)
 
 def process_load_order(a_loadorder, args):
@@ -90,21 +91,21 @@ def process_load_order(a_loadorder, args):
     No matter how the list of plugins is obtained, what's done here stays the same.
     """
     if args.explain:
-        print a_loadorder.explain(args.explain[0], args.base_only)
+        print(a_loadorder.explain(args.explain[0], args.base_only))
         sys.exit(0)
     if args.quiet:
         a_loadorder.update()
     else:
         print(a_loadorder.update())
     if not args.warningsonly:
-        print "{0:-^80}".format('[New Load Order]')
+        print("{0:-^80}".format('[New Load Order]'))
         for plugin in a_loadorder.get_new_order():
-            print plugin
+            print(plugin)
         if args.update:
             a_loadorder.write_new_order()
-            print "{0:-^80}".format('[LOAD ORDER SAVED]')
+            print("{0:-^80}".format('[LOAD ORDER SAVED]'))
         else:
-            print "{0:-^80}".format('[END PROPOSED LOAD ORDER]')
+            print("{0:-^80}".format('[END PROPOSED LOAD ORDER]'))
 
 if __name__ == "__main__":
     #Configure logging from python module
@@ -139,7 +140,7 @@ if __name__ == "__main__":
             """))
 
     parser.add_argument("-n", "--nodownload", help="Do not automatically download and update the mlox rules.", action="store_true")
-    parser.add_argument("-v", "--version", help="Print version and exit.", action="version", version=version.version_info())
+    parser.add_argument("-v", "--version", help="Print version and exit.", action="version", version=version.about())
 
     parser.add_argument("-a", "--all",
         help=single_spaced("""
@@ -221,35 +222,13 @@ if __name__ == "__main__":
     #End Program Arguments
     ###
 
-    logging.debug("\nmlox DEBUG DUMP:\n")
-    # Check Python version
-    logging.debug(version.version_info())
-    pyversion = sys.version[:3]
-    if float(pyversion) < 2.5:
-        logging.error("This program requires at least Python version 2.5.")
-        sys.exit(1)
-
     # parse command line arguments
     logging.debug("Command line: %s", " ".join(sys.argv))
     args = parser.parse_args()
     logging.debug("Parsed Arguments: %s", pprint.pformat(args))
 
-    #Download UPDATE_URL to the program's main directory, then extract its contents there
-    if not args.nodownload:
-        logging.info('Checking for database update...')
-        if update_compressed_file(update_file,UPDATE_URL,program_path):
-            logging.info('Database updated from {0}'.format(update_file))
-
-    #If no arguments are passed or if explicitly asked to, enable gui mode
-    noargs = True
-    for i in vars(args).values():
-        if i:
-            noargs = False
-    if args.gui or noargs:
-        from modules.gui import mlox_gui
-        mlox_gui().start()
-
     #Handle verbosity_group
+    # Want to do this as early as possible so nothing is missed.
     if args.parsedebug:
         logging.getLogger('mlox.parser').setLevel(logging.DEBUG)
         args.debug = True
@@ -258,6 +237,29 @@ if __name__ == "__main__":
     if args.quiet:
         console_log_stream.setLevel(logging.WARNING)
         #Not printing everything else is handled in process_load_order(...)
+
+    # Check Python version
+    logging.debug(version.version_info())
+    logging.debug("Database Directory: %s", user_path)
+    pyversion = sys.version[:3]
+    if float(pyversion) < 3:
+        logging.error("This program requires at least Python version 3.")
+        sys.exit(1)
+
+    # Download UPDATE_URL to user_path, then extract its contents there
+    if not args.nodownload:
+        logging.info('Checking for database update...')
+        if update_compressed_file(update_file, UPDATE_URL, user_path):
+            logging.info('Database updated from {0}'.format(update_file))
+
+    #If no arguments are passed or if explicitly asked to, run the GUI
+    noargs = True
+    for i in vars(args).values():
+        if i:
+            noargs = False
+    if args.gui or noargs:
+        from modules.qtGui import MloxGui
+        MloxGui().start()
 
     if args.profile:
         import hotshot
